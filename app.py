@@ -1,27 +1,34 @@
 #!/usr/bin/env python3
 """
-Smart Pillbox - Flask + SocketIO + Raw WebSocket (/ws)
-Quản lý 4 ngăn thuốc cố định: A, B, C, D (Đã fix lỗi SQLite database is locked)
+Smart Pillbox - Cloud Server (Render / Koyeb)
+Hỗ trợ múi giờ Việt Nam (UTC+7), SocketIO cho Web & Raw WebSocket (/ws) cho ESP32-C3
 """
+import os
 import sqlite3
 import json
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO
 from flask_sock import Sock
 
 DB_FILE = "pillbox.db"
+VN_TZ = timezone(timedelta(hours=7))  # Múi giờ Việt Nam (UTC+7)
+
 app = Flask(__name__, template_folder="templates")
-app.config["SECRET_KEY"] = "smartpillbox-secret-key-2026"
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "smartpillbox-cloud-2026")
 
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 sock = Sock(app)
 
 esp_clients = set()
 esp_lock = threading.Lock()
-db_lock = threading.Lock()  # Khóa đồng bộ truy cập SQLite giữa các luồng
+db_lock = threading.Lock()
+
+
+def now_vn():
+    return datetime.now(VN_TZ)
 
 
 # --- Database ---
@@ -58,7 +65,7 @@ def init_db():
         """)
 
         default_boxes = [
-            ("A", "Omeprazole", "20mg", "07:30", "Trước ăn", 1, 0),
+            ("A", "Omeprazole", "20mg", "07:30", "Trước ăn", 0, 0),
             ("B", "Paracetamol", "500mg", "11:30", "Sau ăn", 0, 0),
             ("C", "Vitamin C", "1000mg", "17:30", "Sau ăn", 0, 0),
             ("D", "Amlodipine", "5mg", "21:00", "Trước khi ngủ", 0, 0),
@@ -76,13 +83,12 @@ init_db()
 
 
 def build_state_payload():
-    """Tạo gói tin JSON chuẩn đồng bộ cho cả Web và ESP32-C3"""
     with db_lock:
         conn = get_db()
         rows = conn.execute("SELECT * FROM boxes ORDER BY id ASC").fetchall()
         conn.close()
 
-    now = datetime.now()
+    now = now_vn()
     boxes_list = []
     active_box = -1
 
@@ -110,7 +116,6 @@ def build_state_payload():
 
 
 def broadcast_all():
-    """Gửi trạng thái mới nhất tới tất cả Web Browser và ESP32-C3"""
     payload = build_state_payload()
     msg_str = json.dumps(payload, ensure_ascii=False)
 
@@ -138,16 +143,16 @@ def log_event(event_type, box_id, detail=""):
         conn.close()
 
     socketio.emit("new_event", {
-        "time": datetime.now().strftime("%H:%M:%S"),
+        "time": now_vn().strftime("%H:%M:%S"),
         "msg": f"[{box_id}] {detail}" if box_id else detail,
     })
 
 
-# --- Luồng kiểm tra giờ uống thuốc tự động ---
+# --- Luồng kiểm tra giờ uống thuốc theo giờ Việt Nam ---
 def scheduler_loop():
     last_minute = ""
     while True:
-        now = datetime.now()
+        now = now_vn()
         cur_hm = now.strftime("%H:%M")
 
         if cur_hm != last_minute:
@@ -187,6 +192,17 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/ping")
+def ping():
+    """Endpoint giữ server chạy 24/7 không bị sleep"""
+    return jsonify({"status": "alive", "time_vn": now_vn().strftime("%Y-%m-%d %H:%M:%S")}), 200
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return "", 204
+
+
 @app.route("/api/state")
 def api_state():
     return jsonify(build_state_payload())
@@ -217,7 +233,6 @@ def api_update_box(box_id):
         conn.commit()
         conn.close()
 
-    # Gọi log_event SAU KHI đã đóng conn để không bị tự khóa database
     if "taken" in data:
         taken_val = 1 if int(data["taken"]) == 1 else 0
         log_event("WEB_TAKEN", box_id, f"Web cập nhật trạng thái: {'Đã uống (1)' if taken_val else 'Chưa uống (0)'}")
@@ -266,7 +281,6 @@ def esp32_ws(ws):
             raw_msg = ws.receive()
             if raw_msg is None:
                 break
-            print("[ESP32-WS] Nhận từ mạch:", raw_msg)
             try:
                 data = json.loads(raw_msg)
                 msg_type = data.get("type")
@@ -295,14 +309,11 @@ def esp32_ws(ws):
         broadcast_all()
 
 
-# --- SocketIO cho Web Browser ---
 @socketio.on("connect")
 def on_browser_connect():
     socketio.emit("state_update", build_state_payload())
 
 
 if __name__ == "__main__":
-    print("=== Smart Pillbox Server (4 Ngăn A-B-C-D) ===")
-    print("Dashboard Web : http://localhost:5000")
-    print("ESP32 Raw WS  : ws://<IP_MAY_TINH>:5000/ws")
-    socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
+    port = int(os.environ.get("PORT", 5000))
+    socketio.run(app, host="0.0.0.0", port=port, debug=False, allow_unsafe_werkzeug=True)

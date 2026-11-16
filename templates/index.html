@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SmartPill Box - Quản Lý 4 Ngăn A B C D</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['"Plus Jakarta Sans"', 'sans-serif'] },
+          colors: {
+            medical: { 50: '#f0f9ff', 100: '#e0f2fe', 500: '#0ea5e9', 600: '#0284c7', 700: '#0369a1' },
+            mint: { 400: '#34d399', 500: '#10b981', 600: '#059669' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>body { font-family: 'Plus Jakarta Sans', sans-serif; }</style>
+</head>
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100 min-h-screen transition-colors duration-200">
+
+  <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"></div>
+
+  <!-- Header -->
+  <header class="sticky top-0 z-40 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-medical-600 to-mint-400 flex items-center justify-center text-white shadow-lg shadow-medical-600/20">
+          <i class="fa-solid fa-capsules text-2xl"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-extrabold bg-gradient-to-r from-medical-600 to-teal-600 dark:from-sky-400 dark:to-mint-400 bg-clip-text text-transparent">SmartPill Box (4 Ngăn)</h1>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Ngăn A • Ngăn B • Ngăn C • Ngăn D</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3 sm:gap-5">
+        <div class="hidden sm:flex items-center gap-3 bg-slate-100 dark:bg-slate-800 px-4 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs font-bold">
+          <span id="clock-display" class="text-medical-600 dark:text-sky-400">--:--</span>
+          <span class="text-slate-300 dark:text-slate-600">|</span>
+          <span id="esp-badge" class="flex items-center gap-1.5 text-rose-500">
+            <span class="h-2.5 w-2.5 rounded-full bg-rose-500"></span> ESP32 OFFLINE
+          </span>
+        </div>
+
+        <button onclick="sendTrigger('reset_all', 'ALL')" class="bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs px-4 py-2.5 rounded-2xl transition flex items-center gap-2">
+          <i class="fa-solid fa-rotate-left"></i><span>Reset 4 ngăn (0)</span>
+        </button>
+
+        <button onclick="toggleDarkMode()" class="p-2.5 rounded-2xl text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800">
+          <i class="fa-solid fa-moon dark:hidden"></i><i class="fa-solid fa-sun hidden dark:inline"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+    <!-- 4 Ngăn Thuốc A - B - C - D -->
+    <section>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-extrabold text-slate-800 dark:text-white flex items-center gap-2">
+          <i class="fa-solid fa-table-cells-large text-medical-600"></i> Trạng Thái 4 Ngăn Thuốc (Đồng Bộ OLED)
+        </h2>
+        <span class="text-xs font-semibold text-slate-500">Trạng thái: <b>0</b> = Chưa uống | <b>1</b> = Đã uống</span>
+      </div>
+
+      <div id="boxes-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <!-- Render tự động 4 thẻ A, B, C, D -->
+      </div>
+    </section>
+
+    <!-- Cấu hình ngăn thuốc & Nhật ký -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <!-- Form Cập Nhật Ngăn A/B/C/D -->
+      <section class="bg-gradient-to-br from-medical-600 to-mint-500 rounded-3xl shadow-xl shadow-medical-600/20 p-6 text-white">
+        <h2 class="text-lg font-extrabold mb-4 flex items-center gap-2">
+          <i class="fa-solid fa-sliders"></i> Cài Đặt Thuốc & Giờ Cho Từng Ngăn
+        </h2>
+        <form onsubmit="saveBoxConfig(event)" class="space-y-4">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-bold uppercase opacity-80 block mb-1">Chọn ngăn hộp</label>
+              <select id="cfg-box" onchange="fillFormFromBox()" class="w-full px-4 py-3 rounded-xl bg-white/15 border border-white/25 text-white font-bold focus:outline-none">
+                <option value="A" class="text-slate-900">Ngăn A</option>
+                <option value="B" class="text-slate-900">Ngăn B</option>
+                <option value="C" class="text-slate-900">Ngăn C</option>
+                <option value="D" class="text-slate-900">Ngăn D</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-bold uppercase opacity-80 block mb-1">Giờ nhắc uống</label>
+              <input id="cfg-time" type="time" required class="w-full px-4 py-3 rounded-xl bg-white/15 border border-white/25 text-white font-bold focus:outline-none">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-bold uppercase opacity-80 block mb-1">Tên thuốc</label>
+              <input id="cfg-med" type="text" placeholder="VD: Paracetamol" required class="w-full px-4 py-3 rounded-xl bg-white/15 border border-white/25 placeholder-white/70 text-white focus:outline-none">
+            </div>
+            <div>
+              <label class="text-xs font-bold uppercase opacity-80 block mb-1">Liều lượng</label>
+              <input id="cfg-dosage" type="text" placeholder="VD: 500mg" class="w-full px-4 py-3 rounded-xl bg-white/15 border border-white/25 placeholder-white/70 text-white focus:outline-none">
+            </div>
+          </div>
+
+          <div>
+            <label class="text-xs font-bold uppercase opacity-80 block mb-1">Ghi chú cách uống</label>
+            <select id="cfg-note" class="w-full px-4 py-3 rounded-xl bg-white/15 border border-white/25 text-white focus:outline-none">
+              <option value="Trước ăn 30p" class="text-slate-900">Trước ăn 30p</option>
+              <option value="Sau ăn" class="text-slate-900">Sau ăn</option>
+              <option value="Trước khi ngủ" class="text-slate-900">Trước khi ngủ</option>
+              <option value="" class="text-slate-900">Không ghi chú</option>
+            </select>
+          </div>
+
+          <button type="submit" class="w-full py-3.5 rounded-xl bg-white text-medical-700 font-extrabold shadow-lg hover:scale-[1.01] transition">
+            <i class="fa-solid fa-cloud-arrow-up mr-1"></i> Lưu & Đồng Bộ Lên Màn Hình OLED
+          </button>
+        </form>
+      </section>
+
+      <!-- Nhật Ký Sự Kiện -->
+      <section class="bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700/60 shadow-sm p-6 flex flex-col">
+        <h2 class="text-lg font-extrabold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+          <i class="fa-solid fa-clock-rotate-left text-amber-500"></i> Nhật Ký Hoạt Động Thời Gian Thực
+        </h2>
+        <div id="event-log" class="space-y-2 max-h-[310px] overflow-y-auto pr-1 flex-1"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    let currentBoxes = [];
+    const socket = io();
+
+    socket.on("connect", () => {
+      addLog("Kết nối WebSocket với Server thành công");
+    });
+
+    socket.on("state_update", (state) => {
+      currentBoxes = state.boxes || [];
+      document.getElementById("clock-display").textContent = `${state.date} • ${state.time}`;
+
+      const espBadge = document.getElementById("esp-badge");
+      if (state.esp_online) {
+        espBadge.className = "flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400";
+        espBadge.innerHTML = `<span class="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-ping"></span> ESP32 ONLINE`;
+      } else {
+        espBadge.className = "flex items-center gap-1.5 text-rose-500";
+        espBadge.innerHTML = `<span class="h-2.5 w-2.5 rounded-full bg-rose-500"></span> ESP32 OFFLINE`;
+      }
+
+      renderBoxes();
+    });
+
+    socket.on("new_event", (ev) => {
+      addLog(ev.msg, ev.time);
+    });
+
+    function renderBoxes() {
+      const grid = document.getElementById("boxes-grid");
+      grid.innerHTML = currentBoxes.map(b => {
+        const isTaken = b.taken === 1;
+        const isDue = b.due && !isTaken;
+
+        let cardStyle = "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700";
+        let badgeHtml = `<span class="px-2.5 py-1 rounded-full text-xs font-extrabold bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300">Chưa uống (0)</span>`;
+
+        if (isTaken) {
+          cardStyle = "bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-700";
+          badgeHtml = `<span class="px-2.5 py-1 rounded-full text-xs font-extrabold bg-emerald-500 text-white"><i class="fa-solid fa-check mr-1"></i>Đã uống (1)</span>`;
+        } else if (isDue) {
+          cardStyle = "bg-rose-50 dark:bg-rose-950/40 border-rose-500 ring-2 ring-rose-400 animate-pulse";
+          badgeHtml = `<span class="px-2.5 py-1 rounded-full text-xs font-extrabold bg-rose-500 text-white"><i class="fa-solid fa-bell mr-1"></i>Tới giờ uống! (0)</span>`;
+        }
+
+        return `
+          <div class="rounded-3xl border-2 ${cardStyle} p-5 shadow-sm transition-all flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-3">
+                <div class="w-11 h-11 rounded-2xl bg-medical-600 text-white font-black text-xl flex items-center justify-center shadow">
+                  ${b.id}
+                </div>
+                ${badgeHtml}
+              </div>
+
+              <div class="mt-2">
+                <p class="text-xs font-bold text-slate-400 uppercase">Giờ uống</p>
+                <p class="text-2xl font-black text-slate-800 dark:text-white">${b.time}</p>
+              </div>
+
+              <div class="mt-3 pt-3 border-t border-slate-200/70 dark:border-slate-700">
+                <h3 class="font-bold text-base text-slate-800 dark:text-slate-100">${b.med} <span class="text-xs font-normal text-slate-500">${b.dosage}</span></h3>
+                <p class="text-xs text-slate-500 mt-0.5">${b.note || 'Không có ghi chú'}</p>
+              </div>
+            </div>
+
+            <div class="mt-5 flex gap-2">
+              <button onclick="toggleTaken('${b.id}', ${isTaken ? 0 : 1})"
+                class="flex-1 py-2.5 rounded-xl text-xs font-extrabold transition ${isTaken ? 'bg-slate-200 text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200' : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow'}">
+                ${isTaken ? 'Đặt lại (0)' : 'Xác nhận uống (1)'}
+              </button>
+              <button onclick="sendTrigger('buzz', '${b.id}')" title="Nhắc nhấp nháy trên OLED"
+                class="px-3.5 py-2.5 rounded-xl bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/50 dark:text-amber-300 text-xs font-bold transition">
+                <i class="fa-solid fa-bell"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function fillFormFromBox() {
+      const id = document.getElementById("cfg-box").value;
+      const box = currentBoxes.find(x => x.id === id);
+      if (box) {
+        document.getElementById("cfg-time").value = box.time;
+        document.getElementById("cfg-med").value = box.med;
+        document.getElementById("cfg-dosage").value = box.dosage;
+        document.getElementById("cfg-note").value = box.note;
+      }
+    }
+
+    function saveBoxConfig(e) {
+      e.preventDefault();
+      const boxId = document.getElementById("cfg-box").value;
+      const payload = {
+        time: document.getElementById("cfg-time").value,
+        med: document.getElementById("cfg-med").value.trim(),
+        dosage: document.getElementById("cfg-dosage").value.trim(),
+        note: document.getElementById("cfg-note").value
+      };
+
+      fetch(`/api/box/${boxId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }).then(r => r.json()).then(() => {
+        showToast(`Đã đồng bộ Ngăn ${boxId} lên ESP32!`, "emerald");
+      });
+    }
+
+    function toggleTaken(boxId, newVal) {
+      fetch(`/api/box/${boxId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taken: newVal })
+      }).then(() => {
+        showToast(`Ngăn ${boxId}: Đã chuyển trạng thái sang ${newVal}`, "medical");
+      });
+    }
+
+    function sendTrigger(action, boxId) {
+      fetch("/api/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, box: boxId })
+      }).then(() => {
+        showToast(action === 'buzz' ? `Đã gửi nhắc nhở Ngăn ${boxId}` : "Đã đặt lại 4 ngăn về 0", "amber");
+      });
+    }
+
+    function showToast(text, color = "medical") {
+      const colors = { medical: "bg-medical-600", emerald: "bg-emerald-600", amber: "bg-amber-500" };
+      const el = document.createElement("div");
+      el.className = `${colors[color]} text-white px-4 py-3 rounded-2xl shadow-xl text-xs font-bold`;
+      el.textContent = text;
+      document.getElementById("toast-container").appendChild(el);
+      setTimeout(() => el.remove(), 2500);
+    }
+
+    function addLog(msg, timeStr = null) {
+      const log = document.getElementById("event-log");
+      const now = timeStr || new Date().toLocaleTimeString("vi-VN");
+      const el = document.createElement("div");
+      el.className = "flex items-center gap-2 text-xs bg-slate-50 dark:bg-slate-700/40 px-3 py-2 rounded-xl border border-slate-100 dark:border-slate-700";
+      el.innerHTML = `<span class="text-slate-400 font-mono">${now}</span><span>${msg}</span>`;
+      log.prepend(el);
+    }
+
+    function toggleDarkMode() {
+      document.documentElement.classList.toggle("dark");
+    }
+
+    // Tải dữ liệu lần đầu để điền sẵn vào form
+    fetch("/api/state").then(r => r.json()).then(state => {
+      currentBoxes = state.boxes || [];
+      renderBoxes();
+      fillFormFromBox();
+    });
+  </script>
+</body>
+</html>
